@@ -10,14 +10,14 @@ class gan(keras.Model):
         self.gen = self.create_gen(32, None)
         self.dis = self.create_dis([28,28,1])
     
-    def compile(self, d_opti, g_opti, run_eagerly = True):
-        super(gan,self).compile(run_eagerly= run_eagerly)
+    def compile(self, d_opti, g_opti):
+        super(gan,self).compile()
         self.d_opti =  d_opti
         self.g_opti = g_opti
-        self.loss = keras.losses.BinaryCrossentropy()
+        self.loss = keras.losses.BinaryCrossentropy(from_logits = True)
 
     def create_dis(self, input_size):
-        dis = keras.Sequential()
+        dis = keras.Sequential(name = "discriminator")
         dis.add(keras.Input(shape=input_size))
         dis.add(Conv2D(32,4,4, 'same', activation=LeakyReLU(0.2)))
         dis.add(Conv2D(64,4,4, 'same', activation=LeakyReLU(0.2)))
@@ -27,27 +27,20 @@ class gan(keras.Model):
         return dis
 
     def create_gen(self, input_size, output_size):
-        gen = keras.Sequential()
+        gen = keras.Sequential(name = "generator")
         gen.add(keras.Input(shape=(input_size)))
-        gen.add(Dense(14*14*128, activation= LeakyReLU(0.2)))
-        gen.add(Reshape([14,14,128]))
+        gen.add(Dense(7*7*128, activation= LeakyReLU(0.2)))
+        gen.add(Reshape([7,7,128]))
 
-        gen.add(Conv2DTranspose(128, 4, 1, 'same', activation=LeakyReLU(0.2)))
+        gen.add(Conv2DTranspose(128, 4, 2, 'same', activation=LeakyReLU(0.2)))
         gen.add(BatchNormalization())
 
-        gen.add(Conv2DTranspose(64, 4, 2, 'same', activation=LeakyReLU(0.2)))
+        gen.add(Conv2DTranspose(128, 4, 2, 'same', activation=LeakyReLU(0.2)))
         gen.add(BatchNormalization())
 
-        gen.add(Conv2DTranspose(32, 4, 1, 'same', activation=LeakyReLU(0.2)))
-        gen.add(BatchNormalization())
-
-        gen.add(Conv2DTranspose(1, 4, 1, 'same', activation=LeakyReLU(0.2)))
-        gen.add(BatchNormalization())
+        gen.add(Conv2D(1, (7, 7), padding="same", activation="sigmoid"))
 
         gen.add(Reshape([28,28]))
-
-        gen.summary()
-
         return gen
 
     def train_step(self, data):
@@ -86,8 +79,35 @@ class gan(keras.Model):
 
 
         return {"d_loss": dis_loss, "g_loss": gen_loss}
-
-
-    def call(self,x ):
-        return self.gen(x)
     
+
+    def test_step(self, data):
+        x = data
+        bs  = x.shape[0]
+
+        self.gen.trainable = False
+        self.dis.trainable = False
+
+        noise = tf.random.normal(shape=[bs,32])
+        generated = self.gen(noise)
+        combined = tf.concat((generated,x), axis = 0)
+        y = tf.concat([tf.ones((bs,1)), tf.zeros((bs,1))], axis = 0)
+
+        y_pred = self.dis(combined)
+        dis_loss = self.loss(y, y_pred)
+        
+        # Generator
+        noise = tf.random.normal(shape=[bs,32])
+        y2 = tf.ones((bs,1))
+        y_pred = self.dis(self.gen(noise))
+        gen_loss = self.loss(y2, y_pred)
+
+        return {"dis_val_loss" : dis_loss, "gen_val_loss" : gen_loss}
+
+
+    def call(self,x):
+        noise = tf.random.normal((x, 32))
+        return self.gen(noise)
+
+
+
